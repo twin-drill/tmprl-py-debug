@@ -323,7 +323,7 @@ class _WorkflowWorker:
                         raise RuntimeError(msg) from None
                     else:
                         if tb and warn:
-                            msg += "\n\tWorker encountered errors while constructing traceback, minimal or partial traceback will be presented."
+                            msg += "\n\System encountered errors while constructing traceback, minimal or partial traceback will be presented."
                         raise RuntimeError(msg).with_traceback(tb) from None
 
         except Exception as err:
