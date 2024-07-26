@@ -6,8 +6,21 @@ import asyncio
 import concurrent.futures
 import logging
 import os
+import sys
 from datetime import timezone
-from typing import Callable, Dict, List, MutableMapping, Optional, Sequence, Set, Type
+from threading import get_ident
+from types import TracebackType
+from typing import (
+    Callable,
+    Dict,
+    List,
+    MutableMapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+)
 
 import temporalio.activity
 import temporalio.api.common.v1
@@ -193,6 +206,43 @@ class _WorkflowWorker:
     ) -> None:
         global LOG_PROTOS
 
+        def get_traceback_for_thread(
+            thread_id: Optional[int],
+        ) -> Tuple[Optional[TracebackType], bool]:
+            # TODO figure out a better way to do this so it is more intuitive than a semaphore
+
+            if not thread_id:
+                return (None, False)
+
+            # retrieve all frames
+            frames = sys._current_frames()
+
+            # if the id is not present, the thread must have terminated or there is another error
+            if thread_id not in frames.keys():
+                return (None, False)
+
+            frame = sys._current_frames()[thread_id]
+            top_tb = TracebackType(
+                None, tb_frame=frame, tb_lasti=frame.f_lasti, tb_lineno=frame.f_lineno
+            )
+
+            # Construct tb stack, might be a better way/builtin to do this
+            tb = top_tb
+            try:
+                while frame.f_back:
+                    frame = frame.f_back
+                    tb.tb_next = TracebackType(
+                        None,
+                        tb_frame=frame,
+                        tb_lasti=frame.f_lasti,
+                        tb_lineno=frame.f_lineno,
+                    )
+                    tb = tb.tb_next
+            except Exception:  # why am i catching base exception vomit emoji
+                return (top_tb, True)
+
+            return (top_tb, False)
+
         # Extract a couple of jobs from the activation
         cache_remove_job = None
         start_job = None
@@ -250,9 +300,32 @@ class _WorkflowWorker:
                         activate_task, self._deadlock_timeout_seconds
                     )
                 except asyncio.TimeoutError:
-                    raise RuntimeError(
-                        f"[TMPRL1101] Potential deadlock detected, workflow didn't yield within {self._deadlock_timeout_seconds} second(s)"
-                    )
+                    # extract the stack of the workflow if possible
+
+                    # cases:
+                    # 1. get_worker_ident() is not implemented for the worker
+                    # 2. get_worker_ident() returns None
+                    # 3. tid is not present in sys._current_frames()
+                    # 4. error occurs during traceback construction
+                    # 5. normal
+
+                    msg = f"[TMPRL1101] Potential deadlock detected, workflow didn't yield within {self._deadlock_timeout_seconds} second(s)"
+                    try:
+                        tid = workflow.get_worker_ident()
+                    except NotImplementedError:
+                        # Default error if the function is not implemented for the workers
+                        raise RuntimeError(msg) from None
+
+                    tb, warn = get_traceback_for_thread(tid)
+
+                    if not tb:
+                        msg += "\n\tWorker was unable to retrieve workflow thread info. No frames from workflow available."
+                        raise RuntimeError(msg) from None
+                    else:
+                        if tb and warn:
+                            msg += "\n\tWorker encountered errors while constructing traceback, minimal or partial traceback will be presented."
+                        raise RuntimeError(msg).with_traceback(tb) from None
+
         except Exception as err:
             # We cannot fail a cache eviction, we must just log and not complete
             # the activation (failed or otherwise). This should only happen in
