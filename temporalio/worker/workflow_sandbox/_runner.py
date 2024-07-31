@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from threading import get_ident
-from typing import Any, Sequence, Type
+from typing import Any, Optional, Sequence, Type
 
 import temporalio.bridge.proto.workflow_activation
 import temporalio.bridge.proto.workflow_completion
@@ -113,7 +113,7 @@ class _Instance(WorkflowInstance):
         self.runner_class = runner_class
         self.importer = Importer(restrictions, RestrictionContext())
 
-        self._current_thread_id: int | None = None  # Optional[int]
+        self._current_thread_id: Optional[int] = None
 
         # Create the instance
         self.globals_and_locals = {
@@ -180,5 +180,5 @@ class _Instance(WorkflowInstance):
             for k, v in extra_globals.items():
                 self.globals_and_locals.pop(k, None)
 
-    def get_worker_ident(self) -> int | None:
+    def get_thread_id(self) -> Optional[int]:
         return self._current_thread_id

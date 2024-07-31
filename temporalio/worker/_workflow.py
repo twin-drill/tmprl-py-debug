@@ -207,13 +207,18 @@ class _WorkflowWorker:
         global LOG_PROTOS
 
         def get_traceback_for_thread(
-            thread_id: Optional[int],
+            thread_id: int,
         ) -> Tuple[Optional[TracebackType], bool]:
-            # TODO figure out a better way to do this so it is more intuitive than a semaphore
+            """Take a thread id and attempt to construct a traceback from its frames.
 
-            if not thread_id:
-                return (None, False)
+            Args:
+                thread_id: Thread ID to be checked.
 
+            Returns:
+                A tuple containing:
+                    0: A TracebackType if it was able to be constructed with a valid TID, None otherwise.
+                    1: A bool that determines whether the error message should warn about a possibly incomplete traceback.
+            """
             # retrieve all frames
             frames = sys._current_frames()
 
@@ -238,7 +243,7 @@ class _WorkflowWorker:
                         tb_lineno=frame.f_lineno,
                     )
                     tb = tb.tb_next
-            except Exception:  # why am i catching base exception vomit emoji
+            except Exception:
                 return (top_tb, True)
 
             return (top_tb, False)
@@ -303,27 +308,26 @@ class _WorkflowWorker:
                     # extract the stack of the workflow if possible
 
                     # cases:
-                    # 1. get_worker_ident() is not implemented for the worker
-                    # 2. get_worker_ident() returns None
+                    # 1. get_thread_id() is not implemented for the worker (returns None, fall to case 2)
+                    # 2. get_thread_id() returns None
                     # 3. tid is not present in sys._current_frames()
                     # 4. error occurs during traceback construction
                     # 5. normal
 
-                    msg = f"[TMPRL1101] Potential deadlock detected, workflow didn't yield within {self._deadlock_timeout_seconds} second(s)"
-                    try:
-                        tid = workflow.get_worker_ident()
-                    except NotImplementedError:
-                        # Default error if the function is not implemented for the workers
+                    msg = f"[TMPRL1101] Potential deadlock detected, workflow didn't yield within {self._deadlock_timeout_seconds} second(s)."
+                    tid = workflow.get_thread_id()
+                    if not tid:
+                        # Default error if the function is not implemented for the workers, or the worker is not running
                         raise RuntimeError(msg) from None
 
                     tb, warn = get_traceback_for_thread(tid)
 
                     if not tb:
-                        msg += "\n\tWorker was unable to retrieve workflow thread info. No frames from workflow available."
+                        msg += "Worker was unable to retrieve workflow thread info. No frames from workflow available."
                         raise RuntimeError(msg) from None
                     else:
                         if tb and warn:
-                            msg += "\n\System encountered errors while constructing traceback, minimal or partial traceback will be presented."
+                            msg += "System encountered errors while constructing traceback, minimal or partial traceback will be presented."
                         raise RuntimeError(msg).with_traceback(tb) from None
 
         except Exception as err:

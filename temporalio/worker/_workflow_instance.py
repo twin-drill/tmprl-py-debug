@@ -159,7 +159,7 @@ class WorkflowInstance(ABC):
         """
         raise NotImplementedError
 
-    def get_worker_ident(self) -> Optional[int]:
+    def get_thread_id(self) -> Optional[int]:
         """Return the thread identifier that this workflow is running on.
 
         Not an abstractmethod because it is not mandatory to implement. Used primarily for getting the frames of a deadlocked thread.
@@ -167,7 +167,7 @@ class WorkflowInstance(ABC):
         Returns:
             Thread ID if the workflow is running, None if not.
         """
-        raise NotImplementedError
+        return None
 
 
 class UnsandboxedWorkflowRunner(WorkflowRunner):
@@ -314,7 +314,7 @@ class _WorkflowInstanceImpl(
         # For tracking the thread this workflow is running on (primarily for deadlock situations)
         self._current_thread_id: Optional[int] = None
 
-    def get_worker_ident(self) -> Optional[int]:
+    def get_thread_id(self) -> Optional[int]:
         return self._current_thread_id
 
     #### Activation functions ####
