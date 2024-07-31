@@ -2107,6 +2107,38 @@ async def test_workflow_stack_trace(client: Client):
 
 
 async def test_workflow_enhanced_stack_trace(client: Client):
+    """Expected format of __enhanced_stack_trace:
+
+    EnhancedStackTrace : {
+
+        sdk (StackTraceSDKInfo) : {
+            name: string,
+            version: string
+        },
+
+        sources (map<string, StackTraceFileSlice>) : {
+            filename: (StackTraceFileSlice) {
+                line_offset: int,
+                content: string
+            },
+            ...
+        },
+
+        stacks (StackTrace[]) : [
+            (StackTraceFileLocation) {
+                file_path: string,
+                line: int,
+                column: int,
+                function_name: string,
+                internal_code: bool
+            },
+            ...
+        ]
+    }
+
+    More details available in API repository: temporal/api/sdk/v1/enhanced_stack_trace.proto
+    """
+
     async with new_worker(
         client, StackTraceWorkflow, LongSleepWorkflow, activities=[wait_cancel]
     ) as worker:
