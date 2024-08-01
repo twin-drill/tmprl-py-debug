@@ -216,17 +216,16 @@ class _WorkflowWorker:
 
             Returns:
                 A tuple containing:
-                    0: A TracebackType if it was able to be constructed with a valid TID, None otherwise.
+                    0: A TracebackType if the supplied thread id is valid, None otherwise.
                     1: A bool that determines whether the error message should warn about a possibly incomplete traceback.
             """
             # retrieve all frames
-            frames = sys._current_frames()
+            frame = sys._current_frames().get(thread_id)
 
             # if the id is not present, the thread must have terminated or there is another error
-            if thread_id not in frames.keys():
+            if not frame:
                 return (None, False)
-
-            frame = sys._current_frames()[thread_id]
+            
             top_tb = TracebackType(
                 None, tb_frame=frame, tb_lasti=frame.f_lasti, tb_lineno=frame.f_lineno
             )
@@ -314,7 +313,7 @@ class _WorkflowWorker:
                     # 4. error occurs during traceback construction
                     # 5. normal
 
-                    msg = f"[TMPRL1101] Potential deadlock detected, workflow didn't yield within {self._deadlock_timeout_seconds} second(s)."
+                    msg = f"[TMPRL1101] Potential deadlock detected: workflow didn't yield within {self._deadlock_timeout_seconds} second(s)."
                     tid = workflow.get_thread_id()
                     if not tid:
                         # Default error if the function is not implemented for the workers, or the worker is not running
@@ -323,12 +322,13 @@ class _WorkflowWorker:
                     tb, warn = get_traceback_for_thread(tid)
 
                     if not tb:
-                        msg += "Worker was unable to retrieve workflow thread info. No frames from workflow available."
+                        msg += " Worker was unable to retrieve workflow thread info. No frames from workflow available."
                         raise RuntimeError(msg) from None
-                    else:
-                        if tb and warn:
-                            msg += "System encountered errors while constructing traceback, minimal or partial traceback will be presented."
-                        raise RuntimeError(msg).with_traceback(tb) from None
+                    
+                    if warn:
+                        msg += " System encountered errors while constructing traceback, minimal or partial traceback will be presented."
+                    
+                    raise RuntimeError(msg).with_traceback(tb) from None
 
         except Exception as err:
             # We cannot fail a cache eviction, we must just log and not complete

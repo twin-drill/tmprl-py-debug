@@ -16,7 +16,7 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
-from threading import get_ident
+import threading
 from typing import (
     Any,
     Awaitable,
@@ -1749,7 +1749,7 @@ class _WorkflowInstanceImpl(
 
     def _run_once(self, *, check_conditions: bool) -> None:
         try:
-            self._current_thread_id = get_ident()
+            self._current_thread_id = threading.get_ident()
             asyncio._set_running_loop(self)
 
             # We instantiate the workflow class _inside_ here because __init__

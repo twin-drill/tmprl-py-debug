@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from threading import get_ident
+import threading
 from typing import Any, Optional, Sequence, Type
 
 import temporalio.bridge.proto.workflow_activation
@@ -172,7 +172,7 @@ class _Instance(WorkflowInstance):
             self.globals_and_locals[k] = v
         try:
             temporalio.workflow.unsafe._set_in_sandbox(True)
-            self._current_thread_id = get_ident()
+            self._current_thread_id = threading.get_ident()
             exec(code, self.globals_and_locals, self.globals_and_locals)
         finally:
             temporalio.workflow.unsafe._set_in_sandbox(False)
