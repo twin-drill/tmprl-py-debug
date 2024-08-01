@@ -226,24 +226,36 @@ class _WorkflowWorker:
             if not frame:
                 return (None, False)
 
-            top_tb = TracebackType(
-                None, tb_frame=frame, tb_lasti=frame.f_lasti, tb_lineno=frame.f_lineno
-            )
-
             # Construct tb stack, might be a better way/builtin to do this
+
+            # gather all frames
+            tb_frames = [frame]
+            while frame.f_back:
+                frame = frame.f_back
+                tb_frames.append(frame)
+
+            top_tb = TracebackType(
+                None,
+                tb_frame=tb_frames[0],
+                tb_lasti=tb_frames[0].f_lasti,
+                tb_lineno=tb_frames[0].f_lineno,
+            )
+            tb_frames.reverse()
+            tb_frames.pop()
+
             tb = top_tb
-            try:
-                while frame.f_back:
-                    frame = frame.f_back
+            for f in tb_frames:
+                try:
                     tb.tb_next = TracebackType(
                         None,
-                        tb_frame=frame,
-                        tb_lasti=frame.f_lasti,
-                        tb_lineno=frame.f_lineno,
+                        tb_frame=f,
+                        tb_lasti=f.f_lasti,
+                        tb_lineno=f.f_lineno,
                     )
                     tb = tb.tb_next
-            except Exception:
-                return (top_tb, True)
+
+                except Exception:  # TODO better exception type
+                    return (top_tb, True)
 
             return (top_tb, False)
 
