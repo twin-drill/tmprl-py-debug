@@ -225,7 +225,7 @@ class _WorkflowWorker:
             # if the id is not present, the thread must have terminated or there is another error
             if not frame:
                 return (None, False)
-            
+
             top_tb = TracebackType(
                 None, tb_frame=frame, tb_lasti=frame.f_lasti, tb_lineno=frame.f_lineno
             )
@@ -324,10 +324,10 @@ class _WorkflowWorker:
                     if not tb:
                         msg += " Worker was unable to retrieve workflow thread info. No frames from workflow available."
                         raise RuntimeError(msg) from None
-                    
+
                     if warn:
                         msg += " System encountered errors while constructing traceback, minimal or partial traceback will be presented."
-                    
+
                     raise RuntimeError(msg).with_traceback(tb) from None
 
         except Exception as err:

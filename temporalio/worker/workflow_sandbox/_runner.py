@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import threading
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Sequence, Type
 
 import temporalio.bridge.proto.workflow_activation
