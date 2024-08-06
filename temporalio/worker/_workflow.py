@@ -206,59 +206,6 @@ class _WorkflowWorker:
     ) -> None:
         global LOG_PROTOS
 
-        def get_traceback_for_thread(
-            thread_id: int,
-        ) -> Tuple[Optional[TracebackType], bool]:
-            """Take a thread id and attempt to construct a traceback from its frames.
-
-            Args:
-                thread_id: Thread ID to be checked.
-
-            Returns:
-                A tuple containing:
-                    0: A TracebackType if the supplied thread id is valid, None otherwise.
-                    1: A bool that determines whether the error message should warn about a possibly incomplete traceback.
-            """
-            # retrieve all frames
-            frame = sys._current_frames().get(thread_id)
-
-            # if the id is not present, the thread must have terminated or there is another error
-            if not frame:
-                return (None, False)
-
-            # Construct tb stack, might be a better way/builtin to do this
-
-            # gather all frames
-            tb_frames = [frame]
-            while frame.f_back:
-                frame = frame.f_back
-                tb_frames.append(frame)
-
-            top_tb = TracebackType(
-                None,
-                tb_frame=tb_frames[0],
-                tb_lasti=tb_frames[0].f_lasti,
-                tb_lineno=tb_frames[0].f_lineno,
-            )
-            tb_frames.reverse()
-            tb_frames.pop()
-
-            tb = top_tb
-            for f in tb_frames:
-                try:
-                    tb.tb_next = TracebackType(
-                        None,
-                        tb_frame=f,
-                        tb_lasti=f.f_lasti,
-                        tb_lineno=f.f_lineno,
-                    )
-                    tb = tb.tb_next
-
-                except Exception:  # TODO better exception type
-                    return (top_tb, True)
-
-            return (top_tb, False)
-
         # Extract a couple of jobs from the activation
         cache_remove_job = None
         start_job = None
@@ -316,31 +263,13 @@ class _WorkflowWorker:
                         activate_task, self._deadlock_timeout_seconds
                     )
                 except asyncio.TimeoutError:
-                    # extract the stack of the workflow if possible
+                    msg, tb = self._build_deadlock_exception(
+                        workflow, self._deadlock_timeout_seconds
+                    )
 
-                    # cases:
-                    # 1. get_thread_id() is not implemented for the worker (returns None, fall to case 2)
-                    # 2. get_thread_id() returns None
-                    # 3. tid is not present in sys._current_frames()
-                    # 4. error occurs during traceback construction
-                    # 5. normal
-
-                    msg = f"[TMPRL1101] Potential deadlock detected: workflow didn't yield within {self._deadlock_timeout_seconds} second(s)."
-                    tid = workflow.get_thread_id()
-                    if not tid:
-                        # Default error if the function is not implemented for the workers, or the worker is not running
-                        raise RuntimeError(msg) from None
-
-                    tb, warn = get_traceback_for_thread(tid)
-
-                    if not tb:
-                        msg += " Worker was unable to retrieve workflow thread info. No frames from workflow available."
-                        raise RuntimeError(msg) from None
-
-                    if warn:
-                        msg += " System encountered errors while constructing traceback, minimal or partial traceback will be presented."
-
-                    raise RuntimeError(msg).with_traceback(tb) from None
+                    if tb:
+                        raise DeadlockError(msg, tb) from None
+                    raise DeadlockError(msg) from None
 
         except Exception as err:
             # We cannot fail a cache eviction, we must just log and not complete
@@ -356,6 +285,9 @@ class _WorkflowWorker:
                 )
                 self._could_not_evict_count += 1
                 return
+
+            if isinstance(err, DeadlockError) and err.has_pending_tb():
+                err.swap_traceback()
 
             logger.exception(
                 "Failed handling activation on workflow with run ID %s", act.run_id
@@ -510,3 +442,142 @@ class _WorkflowWorker:
                 for typ in v.failure_exception_types
             )
         )
+
+    @staticmethod
+    def _build_deadlock_exception(
+        workflow: WorkflowInstance, timeout: Optional[int]
+    ) -> Tuple[str, Optional[TracebackType]]:
+        """Build a RuntimeError based on the frames of a deadlocked workflow.
+
+        Args:
+            workflow: WorkflowInstance containing the deadlocked thread
+            timeout: the timeout used to check if a thread is deadlocked, just to output in the error.
+
+        Returns:
+            A tuple with:
+                0: The TMPRL1101 message, with additions if necessary.
+                1: A TracebackType with the stack frames of the deadlocked thread, if they were able to be accessed. None if not.
+        """
+        msg = f"[TMPRL1101] Potential deadlock detected: workflow didn't yield within {timeout} second(s)."
+
+        # extract the stack of the workflow if possible
+        tid = workflow.get_thread_id()
+
+        # cases:
+        # 1. get_thread_id() is not implemented for the worker [returns None, fall to case 2]
+        # 2. get_thread_id() returns None
+        # 3. tid is not present in sys._current_frames() [get_traceback returns no traceback]
+        # 4. error occurs during traceback construction [present what we have, notify parent to warn]
+        # 5. normal
+
+        if not tid:
+            # Default error if the function is not implemented for the workers, or the worker is not running
+            return msg, None
+
+        tb, warn = _WorkflowWorker._get_traceback_for_thread(tid)
+
+        if not tb:
+            msg += " Worker was unable to retrieve workflow thread info. No frames from workflow available."
+            return msg, None
+
+        if warn:
+            msg += " System encountered errors while constructing traceback, minimal or partial traceback will be presented."
+
+        return msg, tb
+
+    @staticmethod
+    def _get_traceback_for_thread(
+        thread_id: int,
+    ) -> Tuple[Optional[TracebackType], bool]:
+        """Take a thread id and attempt to construct a traceback from its frames.
+
+        Args:
+            thread_id: Thread ID to be checked.
+
+        Returns:
+            A tuple containing:
+                0: A TracebackType if the supplied thread id is valid, None otherwise.
+                1: A bool that determines whether the error message should warn about a possibly incomplete traceback.
+        """
+        # retrieve all frames
+        frame = sys._current_frames().get(thread_id)
+
+        # if the id is not present, the thread must have terminated or there is another error
+        if not frame:
+            return (None, False)
+
+        # Construct tb stack, might be a better way/builtin to do this
+
+        # TODO traceback.extract_stack()
+
+        # gather all frames
+        tb_frames = [frame]
+        while frame.f_back:
+            frame = frame.f_back
+            tb_frames.append(frame)
+
+        # since frames go top to bottom and tb goes bottom to top, we reverse the frames
+
+        # frames: [ current, -1, -2, ... ]
+        # tb    : [ bottom, +1, +2, ..., err ]
+
+        tb_frames.reverse()
+
+        bottom_tb = TracebackType(
+            None,
+            tb_frame=tb_frames[0],
+            tb_lasti=tb_frames[0].f_lasti,
+            tb_lineno=tb_frames[0].f_lineno,
+        )
+        tb_frames.pop(0)
+
+        tb = bottom_tb
+        for f in tb_frames:
+            try:
+                tb.tb_next = TracebackType(
+                    None,
+                    tb_frame=f,
+                    tb_lasti=f.f_lasti,
+                    tb_lineno=f.f_lineno,
+                )
+                tb = tb.tb_next
+
+            except (
+                Exception
+            ):  # TODO better exception type (maybe catch-all is okay, per @cretz?)
+                return (bottom_tb, True)
+
+        return (bottom_tb, False)
+
+
+class DeadlockError(Exception):
+    """Exception class for deadlocks. Contains functionality to swap the default traceback for another."""
+
+    def __init__(self, message: str, replacement_tb: Optional[TracebackType] = None):
+        """Create a new DeadlockError, with message `msg` and optionally a traceback `tb` to be swapped in later.
+
+        Args:
+            message: Message to be presented through exception.
+            replacement_tb: Optional TracebackType to be swapped later.
+        """
+        super().__init__(message)
+        self._new_tb = replacement_tb
+
+    def has_pending_tb(self) -> bool:
+        """Check if the DeadlockError has a pending traceback. For use with swap_traceback().
+
+        Returns:
+            True if there is a pending traceback, false if not.
+        """
+        if self._new_tb:
+            return True
+        return False
+
+    def swap_traceback(self) -> None:
+        """Swap the current traceback for the replacement passed during construction. Used to work around Python adding the current frame to the stack trace.
+
+        Returns:
+            None
+        """
+        self.__traceback__ = self._new_tb
+        self._new_tb = None

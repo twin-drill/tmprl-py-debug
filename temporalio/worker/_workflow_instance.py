@@ -337,6 +337,7 @@ class _WorkflowInstanceImpl(
         self._time_ns = act.timestamp.ToNanoseconds()
         self._is_replaying = act.is_replaying
 
+        self._current_thread_id = threading.get_ident()
         activation_err: Optional[Exception] = None
         try:
             # Split into job sets with patches, then signals + updates, then
@@ -1731,10 +1732,12 @@ class _WorkflowInstanceImpl(
         name: Optional[str],
     ) -> None:
         self._assert_not_read_only("create task")
+        # Name not supported on older Python versions
+        if sys.version_info >= (3, 8):
+            # Put the workflow info at the end of the task name
+            name = name or task.get_name()
+            name += f" (workflow: {self._info.workflow_type}, id: {self._info.workflow_id}, run: {self._info.run_id})"
 
-        # Put the workflow info at the end of the task name
-        name = name or task.get_name()
-        name += f" (workflow: {self._info.workflow_type}, id: {self._info.workflow_id}, run: {self._info.run_id})"
         task.set_name(name)
         # Add to and remove from our own non-weak set instead of relying on
         # Python's weak set which can collect these too early
@@ -1749,7 +1752,6 @@ class _WorkflowInstanceImpl(
 
     def _run_once(self, *, check_conditions: bool) -> None:
         try:
-            self._current_thread_id = threading.get_ident()
             asyncio._set_running_loop(self)
 
             # We instantiate the workflow class _inside_ here because __init__
@@ -1780,7 +1782,6 @@ class _WorkflowInstanceImpl(
                     ]
         finally:
             asyncio._set_running_loop(None)
-            self._current_thread_id = None
 
     # This is used for the primary workflow function and signal handlers in
     # order to apply common exception handling to each
