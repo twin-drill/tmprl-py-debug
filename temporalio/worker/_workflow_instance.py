@@ -1737,8 +1737,7 @@ class _WorkflowInstanceImpl(
             # Put the workflow info at the end of the task name
             name = name or task.get_name()
             name += f" (workflow: {self._info.workflow_type}, id: {self._info.workflow_id}, run: {self._info.run_id})"
-
-        task.set_name(name)
+            task.set_name(name)
         # Add to and remove from our own non-weak set instead of relying on
         # Python's weak set which can collect these too early
         self._tasks.add(task)
