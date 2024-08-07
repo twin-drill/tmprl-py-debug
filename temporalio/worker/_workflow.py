@@ -454,16 +454,6 @@ class _DeadlockError(Exception):
         super().__init__(message)
         self._new_tb = replacement_tb
 
-    def has_pending_tb(self) -> bool:
-        """Check if the DeadlockError has a pending traceback. For use with swap_traceback().
-
-        Returns:
-            True if there is a pending traceback, false if not.
-        """
-        if self._new_tb:
-            return True
-        return False
-
     def swap_traceback(self) -> None:
         """Swap the current traceback for the replacement passed during construction. Used to work around Python adding the current frame to the stack trace.
 
