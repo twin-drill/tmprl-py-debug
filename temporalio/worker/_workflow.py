@@ -473,53 +473,37 @@ class _DeadlockError(Exception):
         if not tid:
             return cls(msg)
 
-        tb, warn = cls._gen_tb_helper(tid)
-
-        if not tb:
-            msg += " Worker was unable to retrieve workflow thread info. No frames from workflow available."
-            return cls(msg)
-
-        if warn == "frame":
-            msg += " System encountered errors while collecting stack frames, minimal or partial traceback will be presented."
-        elif warn == "tb":
-            msg += " System encountered errors while constructing traceback, minimal or partial traceback will be presented."
-
-        return cls(msg, tb)
+        try:
+            tb = cls._gen_tb_helper(tid)
+            if tb:
+                return cls(msg, tb)
+            return cls(f"{msg} (no frames available)")
+        except Exception as err:
+            return cls(f"{msg} (failed getting frames: {err})")
 
     @staticmethod
     def _gen_tb_helper(
         tid: int,
-    ) -> Tuple[Optional[TracebackType], Optional[Literal["frame", "tb"]]]:
+    ) -> Optional[TracebackType]:
         """Take a thread id and construct a stack trace.
 
-        Returns a tuple:
-            0 <Optional[TracebackType]> the traceback that was constructed, None if the thread could not be found.
-            1 <Optional['frame', 'tb']> a flag determining whether an additional warning should be appended to the error message, None if not needed.
+        Returns:
+            <Optional[TracebackType]> the traceback that was constructed, None if the thread could not be found.
         """
         frame = sys._current_frames().get(tid)
         if not frame:
-            return (None, None)
+            return None
 
         # not using traceback.extract_stack() because it obfuscates the frame objects (specifically f_lasti)
-        warn: Optional[Literal["frame", "tb"]] = None
         thread_frames = [frame]
         while frame.f_back:
-            try:
-                frame = frame.f_back
-                thread_frames.append(frame)
-            except Exception:
-                warn = "frame"
-                break
+            frame = frame.f_back
+            thread_frames.append(frame)
 
         thread_frames.reverse()
 
         tb = None
         for frm in thread_frames:
-            try:
-                tb = TracebackType(tb, frm, frm.f_lasti, frm.f_lineno)
-            except Exception:
-                if not warn:
-                    warn = "tb"
-                break
+            tb = TracebackType(tb, frm, frm.f_lasti, frm.f_lineno)
 
-        return (tb, warn)
+        return tb
